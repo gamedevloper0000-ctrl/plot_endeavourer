@@ -1,0 +1,29 @@
+*{
+padding : 0;
+}
+img{
+   opacity:0%;
+}
+#mycanvas{
+   margin:0;
+   position:absolute;
+   top:0;
+   left:0;
+   background:black;
+}
+#keypressed{
+height:15vh;
+width:15vh;
+position:absolute;
+top:75vh;
+left:5vw;
+z-index:20;
+background:gray;
+opacity:20%;
+font-size:80px;
+color:black;
+display:flex;
+justify-content:center;
+border:10px solid brown;
+}
+
