@@ -1,6 +1,6 @@
 
-function drawgrid(ctx,gridx=10,gridy=10,x=20,y=20,s=10){
-ctx.strokeStyle = "red";
+function drawgrid(ctx,gridx=10,gridy=10,x=20,y=20,s=10,color="red"){
+ctx.strokeStyle = color;
 
 for(let i=0;i<y+1;i++){
  ctx.beginPath();
@@ -18,14 +18,14 @@ for(let i=0;i<y+1;i++){
 }
 }
 export {drawgrid};
-function convert(ex,ey,x,y,s){
-return {x:Math.floor(ex/s)-x/s,y:Math.floor(ey/s)-y/s};
+function convert(ex,ey,originX,originY,s){
+return {x:Math.floor((ex-originX)/s),y:Math.floor((ey-originY)/s)};
 }
-function highlight(ctx,x,y,gx,gy,s,color="rgba(22,0,0,0.5)"){
+function highlight(ctx,x,y,originX,originY,s,color="rgba(22,0,0,0.5)"){
 //drawgrid(ctx,grid.x,grid.y,grid.nx,grid.ny,grid.s);
 //convert - highlight
 ctx.fillStyle = color;
-ctx.fillRect((x*s)+gx,(y*s)+gy,s,s);
+ctx.fillRect((x*s)+originX,(y*s)+originY,s,s);
 }
 export {convert,highlight};
 function lerp(x,y,t){
