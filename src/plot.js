@@ -1,10 +1,15 @@
 import { drawgrid, convert, highlight } from "./grid.js";
 import { playSound, resumeSound, setSoundEnabled, soundEnabled } from "./audio.js";
+import { renderOffice, renderAdvisorTips, renderBillPreview } from "./office.js";
+import { ParticleSystem } from "./effects.js";
+import { renderCar } from "./car.js";
+import { renderResults } from "./results.js";
 import {
   COLS, ROWS, TICK_MS, TYPES, ORDERS, CUSTOMERS, INGREDIENTS, BUILDING, TWIST_BONUS, state, getPlot, selectedPlot,
   ownedValue, ownedBuildings, plotId, isRoad, subscribe, selectPlot,
   buySelected, sellSelected, buildSelected, getTwistBlock, twistSelected, tick, prepareCoffee,
-  completeCoffee, deliverCoffee, purchaseCar, resetGame
+  completeCoffee, deliverCoffee, purchaseCar, resetGame, purchaseCost, saleValue, employeeLevel,
+  EMPLOYEES, upgradeEmployee, daysUntilBill, monthlyBillQuote, marketChange
 } from "./state.js";
 
 const $ = selector => document.querySelector(selector);
@@ -13,9 +18,12 @@ const ctx = canvas.getContext("2d");
 const view = $("#view");
 const moneyNode = $("#money");
 const popup = $("#map-popup");
+const resultsDialog = $("#results-dialog");
 const sprite = new Image();
 sprite.src = "public/assets/images/tiny-town.png";
-const money = amount => `$${Math.round(amount).toLocaleString("en-US")}`;
+const groundSprite = new Image();
+groundSprite.src = "public/assets/images/export.png";
+const money = amount => `${amount < 0 ? "−" : ""}$${Math.round(Math.abs(amount)).toLocaleString("en-US")}`;
 const signedMoney = amount => `${amount >= 0 ? "+" : "−"}${money(Math.abs(amount))}`;
 const coordinate = plot => `${String.fromCharCode(65 + plot.x)}${plot.y + 1}`;
 
@@ -29,8 +37,10 @@ let originY = 0;
 let lastFrame = 0;
 let builtAt = 0;
 let lastEventToken = state.lastEvent?.token || null;
-let particles = [];
+const particles = new ParticleSystem();
+let mapGlows = [];
 let resetArmed = false;
+let resultsResetArmed = false;
 let brewStart = 0;
 let twistAt = 0;
 let twistedCells = [];
@@ -40,7 +50,7 @@ const headings = {
   market: ["Market watch", "Four terrains, four different price cycles.", "02 / MARKET"],
   coffee: ["Corner coffee", "Mix, time the shot, and find the right customer.", "03 / WORK"],
   buildings: ["Build & grow", "A building lifts the value of nearby land each day.", "04 / BUILD"],
-  goal: ["The long drive", "Earn enough money to buy the car.", "05 / GOAL"]
+  goal: ["The long drive", "The red roadster is waiting for its next owner.", "06 / GOAL"]
 };
 
 function sectionHeading(page) {
@@ -81,8 +91,9 @@ function renderLand() {
   const type = TYPES[plot.type];
   const owned = plot.owner === "player";
   const change = state.market[plot.type].movement;
-  const profit = owned ? plot.currentValue - plot.costBasis : 0;
-  const afford = state.money >= plot.currentPrice;
+  const profit = owned ? saleValue(plot) - plot.costBasis : 0;
+  const cost = purchaseCost(plot);
+  const afford = state.money >= cost;
   const canBuild = owned && !plot.building && state.money >= BUILDING.cost;
   return `${sectionHeading("land")}${renderStory()}
     <article class="selected-card">
@@ -91,19 +102,19 @@ function renderLand() {
       <div class="detail-grid">
         <div><span>BASE PRICE</span><strong>${money(plot.basePrice)}</strong></div>
         <div><span>MARKET TODAY</span><strong class="${change >= 0 ? "up" : "down"}">${signedMoney(change)} ${change >= 0 ? "↗" : "↘"}</strong></div>
-        <div><span>${owned ? "YOUR PURCHASE" : "PURCHASE PRICE"}</span><strong>${money(owned ? plot.purchasePrice : plot.currentPrice)}</strong></div>
-        <div><span>${owned ? "NET PROFIT / LOSS" : "POTENTIAL SALE"}</span><strong class="${owned ? (profit >= 0 ? "up" : "down") : ""}">${owned ? signedMoney(profit) : money(plot.currentValue)}</strong></div>
+        <div><span>${owned ? "YOUR PURCHASE" : "PURCHASE PRICE"}</span><strong>${money(owned ? plot.purchasePrice : cost)}</strong></div>
+        <div><span>${owned ? "NET SALE PROFIT / LOSS" : "NET SALE VALUE"}</span><strong class="${owned ? (profit >= 0 ? "up" : "down") : ""}">${owned ? signedMoney(profit) : money(saleValue(plot))}</strong></div>
         <div><span>BUILDING</span><strong>${plot.building ? "Field station" : "None"}</strong></div>
         <div><span>IMPROVEMENT LIFT</span><strong class="up">+${money(plot.buildingEffects)}</strong></div>
         <div><span>SURVEY PREMIUM</span><strong class="up">+${money(plot.surveyBonus)}</strong></div>
         <div><span>PRICE RECORDS</span><strong>${plot.priceHistory.length} saved</strong></div>
       </div>
       <div class="action-row">${owned
-        ? `<button class="primary" data-action="sell">Sell for ${money(plot.currentValue)} ↗</button><button class="secondary" data-action="build" ${plot.building || !canBuild ? "disabled" : ""}>${plot.building ? "Built" : `Build · ${money(BUILDING.cost)}`}</button>`
-        : `<button class="primary" data-action="buy" ${!afford ? "disabled" : ""}>${afford ? `Buy plot · ${money(plot.currentPrice)}` : `Need ${money(plot.currentPrice - state.money)} more`}</button>`}
+        ? `<button class="primary" data-action="sell">Sell for ${money(saleValue(plot))} ↗</button><button class="secondary" data-action="build" ${plot.building || !canBuild ? "disabled" : ""}>${plot.building ? "Built" : `Build · ${money(BUILDING.cost)}`}</button>`
+        : `<button class="primary" data-action="buy" ${!afford ? "disabled" : ""}>${afford ? `Buy plot · ${money(cost)}` : `Need ${money(cost - state.money)} more`}</button>`}
         ${state.story.chapter >= 2 ? `<button class="secondary" data-action="twist" ${state.story.twistCharges < 1 ? "disabled" : ""}>⟳ Twist · ${state.story.twistCharges}</button>` : ""}
       </div>
-      <p class="helper-note">${owned ? "Selling transfers the land and any building on it. Profit includes your building cost." : "Work a coffee order to earn cash, then buy this parcel when you can afford it."}</p>
+      <p class="helper-note">${owned ? "The 5% sale closing fee and construction cost are included in parcel profit. Monthly bills are included in your Office run gain." : employeeLevel("agent") ? `Your agent's ${employeeLevel("agent") * 2}% discount is included. A future sale has a 5% closing fee.` : "Work a coffee order to earn cash. Every land sale has a 5% closing fee, already included in the net sale value."}</p>
     </article>
     <div class="mini-banner"><b>⌁</b><span>${owned ? "Your ownership is marked in gold on the map." : "Prices follow gentle cycles, so holding and timing your sale matters."}</span></div>${renderTwistControl()}`;
 }
@@ -126,9 +137,11 @@ function renderMarket() {
     ${state.story.chapter >= 1 ? `<div class="market-bulletin"><span>◉ &nbsp; LATE EDITION</span><p>The town's survey records were altered. A stamped deed on the map may explain the price swings.</p></div>` : ""}
     <div class="market-list">${TYPES.map((type, index) => {
       const entry = state.market[index];
-      return `<div class="market-row"><div class="market-name"><i class="market-dot" style="background:${type.color}"></i><div>${type.name}<small>${type.note}</small></div></div>${sparkline(entry.history, type.color, type.name)}<div class="market-number">${money(entry.currentPrice)}<small class="${entry.movement >= 0 ? "up" : "down"}">${signedMoney(entry.movement)} today</small></div></div>`;
+      const week = marketChange(index);
+      return `<div class="market-row"><div class="market-name"><i class="market-dot" style="background:${type.color}"></i><div>${type.name}<small>${type.note}</small></div></div>${sparkline(entry.history, type.color, type.name)}<div class="market-number">${money(entry.currentPrice)}<small class="${entry.movement >= 0 ? "up" : "down"}">${signedMoney(entry.movement)} today</small><small class="${week >= 0 ? "up" : "down"}">${week >= 0 ? "+" : ""}${week.toFixed(1)}% / 7d</small></div></div>`;
     }).join("")}</div>
-    <p class="market-foot">Each line shows up to 48 game days. The prices shown here are type averages; individual parcels also reflect their location and nearby improvements.</p>`;
+    <p class="market-foot">Each line shows up to 48 game days. Seven-day moves use all available days at the start of a run. Individual parcels also reflect location and nearby improvements.</p>
+    ${renderAdvisorTips()}${renderBillPreview(true)}`;
 }
 
 function ingredientChoices(order, orderIndex) {
@@ -173,7 +186,7 @@ function renderCoffee() {
       <p class="arcade-instruction">The ticket says <strong>${customer.name}</strong>, the ${customer.role.toLowerCase()}. Tap the right person in the line above to hand over the cup.</p>`;
   return `${sectionHeading("coffee")}
     <div class="shop-scene"><span class="shop-roof"></span><span class="shop-sign">THE CORNER CUP / OPEN LATE</span><span class="shop-window"></span><span class="shop-door"></span><span class="shop-counter"></span>${renderCustomerQueue(coffee)}</div>
-    <div class="order-paper"><span class="eyebrow-mini">TICKET #${String(coffee.served + 1).padStart(3, "0")} / ${customer.role.toUpperCase()}</span><strong class="order-pay">${money(order.pay)} + TIP</strong><h3>${order.name}</h3><p>FOR ${customer.name.toUpperCase()} &nbsp;·&nbsp; ${order.ingredients.join(" → ")}</p></div>
+    <div class="order-paper"><span class="eyebrow-mini">TICKET #${String(coffee.served + 1).padStart(3, "0")} / ${customer.role.toUpperCase()}</span><strong class="order-pay">${money(Math.round(order.pay * (1 + employeeLevel("manager") * .12)))} + TIP</strong><h3>${order.name}</h3><p>FOR ${customer.name.toUpperCase()} &nbsp;·&nbsp; ${order.ingredients.join(" → ")}</p></div>
     <div class="arcade-panel">${stage}</div>
     <div class="coffee-rumor"><span>LAST THING OVERHEARD</span><p>“${state.story.lastLine}”</p></div>
     <p class="shop-tip">${coffee.served} ${coffee.served === 1 ? "order" : "orders"} served · ${coffee.cleanOrders} perfect. ${state.story.chapter >= 2 ? `${coffee.twistPerfectProgress}/3 perfect orders toward your next plot turn.` : "Perfect orders will power the turntable once the secret is found."}</p>
@@ -192,24 +205,34 @@ function renderBuildings() {
     ${owned.length ? `<div class="holding-list">${owned.map(item => `<button data-select="${item.id}"><span>${TYPES[item.type].name} · ${coordinate(item)}</span><small>${item.building ? "STATION BUILT" : "OPEN SITE"} &nbsp; ${money(item.currentValue)}</small></button>`).join("")}</div>` : `<div class="mini-banner"><b>⌑</b><span>Buy your first plot on the Land tab to unlock construction.</span></div>`}`;
 }
 
-const carSvg = `<svg viewBox="0 0 520 220" role="img" aria-label="Illustrated green vintage sports car"><ellipse cx="260" cy="194" rx="205" ry="14" fill="#18342e" opacity=".38"/><path d="M75 151 L93 125 L150 113 L195 62 Q212 46 247 46 H315 Q343 47 366 76 L398 117 L448 128 Q464 132 468 151 L460 171 H69 L66 159 Q66 153 75 151Z" fill="#b6cf8e" stroke="#203e35" stroke-width="8" stroke-linejoin="round"/><path d="M200 65 H311 Q334 66 353 91 L371 119 H163 Z" fill="#284f50" stroke="#203e35" stroke-width="7"/><path d="M276 64 L271 119" stroke="#d8e8b0" stroke-width="7"/><path d="M153 120 H399" stroke="#d8e8b0" stroke-width="5"/><path d="M69 158 H463" stroke="#4c765c" stroke-width="11"/><path d="M90 132 L115 130 L104 144 L82 146Z" fill="#fff1b9" stroke="#d7c88a" stroke-width="4"/><path d="M438 134 L459 142 L460 150 L437 149Z" fill="#d78761"/><path d="M188 149 H349" stroke="#739b73" stroke-width="6"/><circle cx="158" cy="170" r="32" fill="#263b34"/><circle cx="158" cy="170" r="16" fill="#e7e3cb" stroke="#819488" stroke-width="6"/><circle cx="384" cy="170" r="32" fill="#263b34"/><circle cx="384" cy="170" r="16" fill="#e7e3cb" stroke="#819488" stroke-width="6"/><path d="M200 77 L235 77" stroke="#87aa9b" stroke-width="3" opacity=".8"/></svg>`;
-
 function renderGoal() {
   const goal = state.carGoal;
   const won = goal.purchased;
-  const progress = won ? 100 : Math.min(100, Math.round(state.money / goal.price * 100));
+  const ready = !won && state.money >= goal.price;
+  const progress = won ? 100 : Math.max(0, Math.min(100, Math.round(state.money / goal.price * 100)));
   return `${sectionHeading("goal")}
-    <div class="goal-stage ${won ? "won" : ""}"><span class="goal-caption">${won ? "YOURS TO DRIVE · GOAL COMPLETE" : "THE FINISH LINE · VALLEY ROADSTER"}</span>${carSvg}</div>
-    <div class="goal-copy"><h3>${won ? "Keys in hand." : "One day, yours."}</h3><strong>${money(goal.price)}</strong></div>
+    <div class="goal-stage ${won ? "won" : ready ? "available" : "locked"}"><span class="goal-caption">${won ? "CAR PURCHASED / GOAL ACHIEVED" : ready ? "CAR UNLOCKED / AVAILABLE TO PURCHASE" : "CAR LOCKED / THE RED ROADSTER"}</span>${renderCar("goal")}</div>
+    <div class="goal-copy"><h3>${won ? "Keys in hand." : ready ? "Ready when you are." : "One day, yours."}</h3><strong>${money(goal.price)}</strong></div>
     <div class="progress-shell" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}" aria-label="Car savings progress"><div class="progress-fill" style="width:${progress}%"></div></div>
-    <div class="goal-meta"><span>${won ? "GOAL COMPLETE" : `${progress}% OF GOAL SAVED`}</span><strong>${won ? "DRIVE SAFE" : `${money(Math.max(0, goal.price - state.money))} TO GO`}</strong></div>
-    <button class="primary" data-action="goal" ${won || state.money < goal.price ? "disabled" : ""}>${won ? "Car purchased" : state.money < goal.price ? "Keep earning & investing" : `Buy the roadster · ${money(goal.price)}`}</button>
-    <p class="goal-message">${won ? (state.story.twists > 0 ? "PLOT TWIST: the roadster was the surveyor's old field car. Its trunk holds the original deeds. You did not just escape the valley; you can redraw its future." : "The glove box holds a spiral-stamped deed. The valley still has a secret for you to find.") : "Work a shift. Buy a parcel. Build up the neighborhood. Sell at the right time."}</p>
+    <div class="goal-meta"><span>${won ? "GOAL COMPLETE" : `${progress}% OF GOAL SAVED`}</span><strong>${won ? "YOURS TO DRIVE" : ready ? "AVAILABLE NOW" : `${money(Math.max(0, goal.price - state.money))} TO GO`}</strong></div>
+    <div class="goal-cash">YOUR CASH <strong>${money(state.money)}</strong></div>
+    ${won ? `<button class="primary" data-action="results">View your results</button>` : `<button class="primary goal-buy ${ready ? "ready" : ""}" data-action="goal" ${!ready ? "disabled" : ""}>${ready ? `BUY THE RED ROADSTER · ${money(goal.price)}` : "Keep earning & investing"}</button>`}
+    <p class="goal-message">${won ? (state.story.twists > 0 ? "PLOT TWIST: the roadster was the surveyor's old field car. Its trunk holds the original deeds. You can redraw the valley's future." : "The glove box holds a spiral-stamped deed. The valley still has a secret for you to find.") : ready ? "You made it. The keys are waiting at the exchange. Buy the car when you are ready to celebrate." : "Work a shift. Buy a parcel. Build up the neighborhood. Watch your bills, then sell at the right time."}</p>
     <button class="text-button" data-action="reset">${resetArmed ? "Click again to erase this run" : "Start a new run"}</button>`;
 }
 
-const renderers = { land: renderLand, market: renderMarket, coffee: renderCoffee, buildings: renderBuildings, goal: renderGoal };
-function renderView() { view.innerHTML = renderers[route](); }
+const renderers = { land: renderLand, market: renderMarket, coffee: renderCoffee, buildings: renderBuildings, office: renderOffice, goal: renderGoal };
+function renderView() {
+  const ledgerOpen = view.querySelector(".ledger-history")?.open;
+  const ledgerScroll = view.querySelector(".ledger-rows")?.scrollTop || 0;
+  view.innerHTML = renderers[route]();
+  // Daily price updates must not close a ledger the player is reading.
+  const ledger = view.querySelector(".ledger-history");
+  if (ledger && ledgerOpen) {
+    ledger.open = true;
+    ledger.querySelector(".ledger-rows").scrollTop = ledgerScroll;
+  }
+}
 function updateChrome() {
   moneyNode.textContent = money(state.money);
   $("#portfolio-value").textContent = money(ownedValue());
@@ -218,6 +241,9 @@ function updateChrome() {
   const day = `DAY ${String(state.gameTime + 1).padStart(2, "0")}`;
   $("#game-day").textContent = day;
   $("#top-day").textContent = day;
+  $("#bill-countdown").textContent = `Bill in ${daysUntilBill()} ${daysUntilBill() === 1 ? "day" : "days"}`;
+  $("#bill-countdown").title = `Current estimate: ${money(monthlyBillQuote().total)}. One day passes every 3.5 seconds.`;
+  document.querySelector('[data-route="goal"]').classList.toggle("goal-ready", !state.carGoal.purchased && state.money >= state.carGoal.price);
 }
 
 function setRoute(next) {
@@ -243,6 +269,51 @@ function notify(message, detail = "", negative = false) {
   setTimeout(() => toast.remove(), 3300);
 }
 
+function notifyCarAvailable() {
+  const toast = document.createElement("div");
+  toast.className = "toast car-unlock-toast";
+  toast.innerHTML = `<strong>CAR AVAILABLE!</strong><small>You have enough money for the red roadster.</small><button type="button">PURCHASE CAR →</button>`;
+  toast.querySelector("button").addEventListener("click", () => { location.hash = "goal"; toast.remove(); });
+  $("#toast-stack").append(toast);
+  setTimeout(() => toast.remove(), 10000);
+  flashStory("CAR UNLOCKED");
+  playSound("car-available");
+}
+
+function openResults() {
+  if (!state.carGoal.purchased || resultsDialog.open) return;
+  resultsResetArmed = false;
+  resultsDialog.innerHTML = renderResults();
+  resultsDialog.classList.remove("closing");
+  resultsDialog.showModal();
+  document.body.classList.add("results-open");
+  resultsDialog.querySelector('[data-result="continue"]').focus();
+}
+
+function closeResults() {
+  if (resultsDialog.classList.contains("closing")) return;
+  resultsDialog.classList.add("closing");
+  setTimeout(() => { resultsDialog.close(); resultsDialog.classList.remove("closing"); }, 180);
+}
+
+function restartRun() {
+  resetArmed = false;
+  resultsResetArmed = false;
+  if (resultsDialog.open) resultsDialog.close();
+  particles.clear();
+  mapGlows = [];
+  brewStart = 0;
+  twistedCells = [];
+  popup.classList.remove("show");
+  popup.textContent = "";
+  $("#story-flash").classList.remove("show");
+  $("#story-flash").textContent = "";
+  $("#toast-stack").replaceChildren();
+  resetGame();
+  location.hash = "land";
+  setRoute("land");
+}
+
 function mapPoint(id) {
   const plot = getPlot(id);
   return plot ? { x: originX + (plot.x + .5) * tileSize, y: originY + (plot.y + .5) * tileSize } : null;
@@ -250,13 +321,8 @@ function mapPoint(id) {
 function spawnParticles(event) {
   const point = mapPoint(event.plotId);
   if (!point) return;
-  const color = event.kind === "sell" ? "#f3d488" : event.kind === "build" ? "#e8dfc6" : "#c5eb9c";
-  for (let i = 0; i < 20; i++) {
-    const angle = i * Math.PI * 2 / 20 + Math.random() * .3;
-    const speed = 1.2 + Math.random() * 2.2;
-    particles.push({ x: point.x, y: point.y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed - 1,
-      life: 1, size: 2 + Math.random() * 3, color });
-  }
+  particles.burst(event.kind, point.x, point.y);
+  mapGlows.push({ id: event.plotId, start: performance.now(), duration: 1050 });
   popup.textContent = event.kind === "sell" ? `+${money(event.amount)}` : `−${money(event.amount)}`;
   popup.style.left = `${point.x / canvasWidth * 100}%`;
   popup.style.top = `${point.y / canvasHeight * 100}%`;
@@ -278,6 +344,7 @@ function handleEvent(event) {
   if (!event || event.token === lastEventToken) return;
   lastEventToken = event.token;
   playSound(event.kind, event);
+  if (event.carAvailable) notifyCarAvailable();
   if (event.kind === "select") return;
   if (event.kind === "build") builtAt = performance.now();
   const messages = {
@@ -288,6 +355,8 @@ function handleEvent(event) {
     "coffee-ready": ["RECIPE LOCKED", "Now time the shot in the gold zone."],
     "coffee-brew": [event.grade === 2 ? "PERFECT SHOT" : event.grade === 1 ? "GOOD SHOT" : "ROUGH SHOT", "Find the customer on the ticket."],
     "coffee-deliver": [event.correct ? "ORDER DELIVERED" : "WRONG CUSTOMER", `+${money(event.amount)} earned at the shop.`],
+    "month-bill": [`MONTH ${event.month} CLOSED`, `Insurance ${money(event.insurance)} + tax ${money(event.tax)} = ${money(event.total)} paid.`],
+    "employee-upgrade": ["TEAM UPGRADED", `${EMPLOYEES.find(employee => employee.id === event.employeeId)?.name || "Employee"} is now level ${event.level}.`],
     twist: ["THE PLOTS TURNED", "Four deeds rotated clockwise."],
     goal: ["GOAL COMPLETE", "The valley roadster is yours."],
     reset: ["NEW RUN STARTED", "The valley is yours to explore again."]
@@ -309,9 +378,7 @@ function handleEvent(event) {
     flashStory("THE PLOTS TURN!");
     for (const id of event.block) {
       const point = mapPoint(id);
-      for (let i = 0; i < 7; i++) particles.push({ x: point.x, y: point.y,
-        vx: (Math.random() - .5) * 4, vy: (Math.random() - .5) * 4,
-        life: 1, size: 2 + Math.random() * 4, color: "#f2d075" });
+      if (point) particles.burst("twist", point.x, point.y);
     }
   }
   if (["buy", "sell", "coffee-deliver", "goal"].includes(event.kind)) {
@@ -319,9 +386,8 @@ function handleEvent(event) {
     setTimeout(() => moneyNode.classList.remove("bump"), 400);
   }
   if (event.kind === "goal") {
-    for (let i = 0; i < 55; i++) particles.push({ x: Math.random() * canvasWidth, y: -Math.random() * 140,
-      vx: (Math.random() - .5) * 2, vy: 1 + Math.random() * 2, life: 2, size: 3 + Math.random() * 4,
-      color: ["#edca77", "#b9d793", "#f7e8b6", "#7cb5ad"][i % 4] });
+    particles.celebrate(canvasWidth);
+    openResults();
   }
 }
 
@@ -346,6 +412,12 @@ function tinyTile(index, x, y, width, height = width) {
   }
 }
 
+function exportTile(sx, sy, sw, sh, x, y, width, height = width) {
+  if (groundSprite.complete && groundSprite.naturalWidth === 145) {
+    ctx.drawImage(groundSprite, sx, sy, sw, sh, x, y, width, height);
+  } else { ctx.fillStyle = "#bdce73"; ctx.fillRect(x, y, width, height); }
+}
+
 function drawRoad(x, y) {
   const [px, py, s] = tileRect(x, y);
   ctx.fillStyle = "#7eaa64"; ctx.fillRect(px, py, s + .5, s + .5);
@@ -356,22 +428,19 @@ function drawRoad(x, y) {
 function drawTerrainDetail(plot) {
   const [x, y, s] = tileRect(plot.x, plot.y);
   const seed = (plot.x * 17 + plot.y * 31 + state.seed) >>> 0;
-  ctx.fillStyle = plot.type === 0 ? "#d9a06b" : "#7eaa64";
-  ctx.fillRect(x, y, s + .5, s + .5);
-  tinyTile(plot.type === 0 ? 25 : seed % 5 === 0 ? 1 : 0, x, y, s + .5, s + .5);
+  // Only the painted regions of export.png are sprites. The rest of its 145×90 canvas is white.
+  exportTile((seed % 3) * 31, 13, 31, 31, x, y, s + .5, s + .5);
   if (plot.type === 0) {
-    if (seed % 4 === 0) tinyTile(2, x + s * .33, y + s * .22, s * .38);
-    else tinyTile(39, x + s * .13, y + s * .28, s * .7);
+    ctx.fillStyle = "rgba(246,190,81,.24)"; ctx.fillRect(x, y, s, s);
+    ctx.fillStyle = "#e4d991";
+    for (let i = 0; i < 3; i++) ctx.fillRect(x + s * (.2 + i * .22), y + s * .56, Math.max(1, s * .035), s * .13);
   } else if (plot.type === 1) {
-    tinyTile(seed % 3 === 0 ? 2 : 1, x + s * .17, y + s * .21, s * .66);
     if (seed % 5 === 0) tinyTile(29, x + s * .55, y + s * .5, s * .34);
   } else if (plot.type === 2) {
     tinyTile([4, 5, 6, 16][seed % 4], x + s * .16, y + s * .06, s * .72);
     if (seed % 3 === 0) tinyTile(17, x + s * .56, y + s * .6, s * .3);
   } else {
-    ctx.fillStyle = "#398db2"; ctx.fillRect(x + s * .13, y + s * .24, s * .75, s * .56);
-    ctx.fillStyle = "#65b8d3"; ctx.fillRect(x + s * .2, y + s * .32, s * .62, s * .14);
-    ctx.fillStyle = "#a0d8df"; ctx.fillRect(x + s * .29, y + s * .42, s * .23, Math.max(2, s * .055));
+    exportTile((seed % 3) * 16, 0, 16, 13, x + s * .12, y + s * .2, s * .88, s * .8);
     tinyTile(seed % 2 ? 16 : 17, x + s * .03, y + s * .08, s * .31);
   }
 }
@@ -401,6 +470,21 @@ function drawMap(now) {
     else { const plot = getPlot(plotId(x, y)); drawTerrainDetail(plot); }
   }
   drawgrid(ctx, originX, originY, COLS, ROWS, tileSize, "rgba(27,59,43,.10)");
+  mapGlows = mapGlows.filter(glow => now - glow.start < glow.duration);
+  for (const glow of mapGlows) {
+    const plot = getPlot(glow.id);
+    if (!plot) continue;
+    const [x, y, s] = tileRect(plot.x, plot.y);
+    const fade = 1 - (now - glow.start) / glow.duration;
+    ctx.save();
+    ctx.fillStyle = `rgba(255,235,159,${fade * .48})`;
+    ctx.fillRect(x, y, s, s);
+    ctx.strokeStyle = `rgba(255,247,199,${fade})`;
+    ctx.lineWidth = Math.max(2, s * .06);
+    ctx.shadowColor = "#ffe49b"; ctx.shadowBlur = 20 * fade;
+    ctx.strokeRect(x + 2, y + 2, s - 4, s - 4);
+    ctx.restore();
+  }
   if (state.story.chapter === 1) {
     const marked = getPlot(state.story.anomalyId);
     const [x, y, s] = tileRect(marked.x, marked.y);
@@ -460,13 +544,7 @@ function drawMap(now) {
       ctx.strokeRect(x + 2, y + 2, s - 4, s - 4);
     }
   }
-  particles = particles.filter(p => p.life > 0);
-  for (const p of particles) {
-    p.x += p.vx; p.y += p.vy; p.vy += .035; p.life -= .025;
-    ctx.globalAlpha = Math.min(1, p.life); ctx.fillStyle = p.color;
-    ctx.fillRect(p.x, p.y, p.size, p.size);
-  }
-  ctx.globalAlpha = 1;
+  particles.draw(ctx, now);
 }
 
 function brewPosition(now) {
@@ -536,6 +614,8 @@ view.addEventListener("click", event => {
   if (ingredient) { prepareCoffee(ingredient); return; }
   const customer = event.target.closest("[data-customer]")?.dataset.customer;
   if (customer) { deliverCoffee(customer); return; }
+  const employee = event.target.closest("[data-employee]")?.dataset.employee;
+  if (employee) { upgradeEmployee(employee); return; }
   const action = event.target.closest("[data-action]")?.dataset.action;
   if (!action) return;
   if (action === "brew") {
@@ -549,26 +629,35 @@ view.addEventListener("click", event => {
   }
   if (action === "reset") {
     if (!resetArmed) { resetArmed = true; renderView(); return; }
-    resetArmed = false;
-    particles = [];
-    brewStart = 0;
-    twistedCells = [];
-    popup.classList.remove("show");
-    popup.textContent = "";
-    $("#story-flash").classList.remove("show");
-    $("#story-flash").textContent = "";
-    $("#toast-stack").replaceChildren();
-    resetGame();
-    location.hash = "land";
+    restartRun();
     return;
   }
   ({ buy: buySelected, sell: sellSelected, build: buildSelected, twist: twistSelected,
-    goal: purchaseCar, "coffee-route": () => { location.hash = "coffee"; } })[action]?.();
+    goal: purchaseCar, results: openResults, "coffee-route": () => { location.hash = "coffee"; },
+    "office-route": () => { location.hash = "office"; } })[action]?.();
 });
+
+resultsDialog.addEventListener("click", event => {
+  const action = event.target.closest("[data-result]")?.dataset.result;
+  if (action === "continue") closeResults();
+  if (action === "restart") {
+    if (resultsResetArmed) { restartRun(); return; }
+    resultsResetArmed = true;
+    resultsDialog.innerHTML = renderResults(true);
+    resultsDialog.querySelector('[data-result="restart"]').focus();
+  }
+  if (action === "cancel") {
+    resultsResetArmed = false;
+    resultsDialog.innerHTML = renderResults();
+    resultsDialog.querySelector('[data-result="continue"]').focus();
+  }
+});
+resultsDialog.addEventListener("cancel", event => { event.preventDefault(); closeResults(); });
+resultsDialog.addEventListener("close", () => document.body.classList.remove("results-open"));
 
 subscribe((_, kind) => {
   updateChrome();
-  if (kind || route === "land" || route === "market" || route === "buildings") renderView();
+  if (kind || ["land", "market", "buildings", "office"].includes(route)) renderView();
   handleEvent(state.lastEvent);
 });
 const observer = new ResizeObserver(resizeCanvas);
@@ -577,5 +666,5 @@ resizeCanvas();
 setRoute(location.hash.slice(1));
 updateChrome();
 updateSoundButton();
-setInterval(tick, TICK_MS);
+setInterval(() => { if (!resultsDialog.open) tick(); }, TICK_MS);
 requestAnimationFrame(animate);

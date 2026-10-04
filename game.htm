@@ -8,6 +8,7 @@
   <title>Plot Twist — Plot Endeavourer</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23172d2c'/%3E%3Cpath d='M11 43 32 12l21 31-21 12z' fill='%23e4b866'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="src/style.css">
+  <link rel="stylesheet" href="src/progression.css">
 </head>
 <body>
   <div class="game-shell">
@@ -18,16 +19,17 @@
     <main class="main-grid">
       <section class="world-panel" aria-label="Land map">
         <div class="world-heading"><div><span class="eyebrow">01 / EXPLORE</span><h1>The valley<span class="title-star">✳</span></h1><p>Every tile has a story. Pick one to see its price.</p></div><div class="map-chip"><span class="map-chip-dot"></span> LIVE MAP</div></div>
-        <div class="canvas-frame"><canvas id="mycanvas" aria-label="Interactive land map painted with Kenney Tiny Town tiles"></canvas><div id="map-popup" class="map-popup" aria-live="polite"></div><div id="story-flash" class="story-flash" aria-live="polite"></div><div class="canvas-corner tl"></div><div class="canvas-corner tr"></div><div class="canvas-corner bl"></div><div class="canvas-corner br"></div></div>
+        <div class="canvas-frame"><canvas id="mycanvas" aria-label="Interactive land map using the supplied export terrain and Tiny Town scenery"></canvas><div id="map-popup" class="map-popup" aria-live="polite"></div><div id="story-flash" class="story-flash" aria-live="polite"></div><div class="canvas-corner tl"></div><div class="canvas-corner tr"></div><div class="canvas-corner bl"></div><div class="canvas-corner br"></div></div>
         <div class="map-footer"><span>◈ &nbsp;CLICK A PLOT TO INSPECT</span><span><i class="legend-owned"></i> YOUR LAND &nbsp;&nbsp; <i class="legend-road"></i> ROAD</span></div>
       </section>
       <aside class="control-panel">
-        <div class="control-top"><div><span class="eyebrow">YOUR ESTATE</span><div class="wallet" id="money">$120</div></div><div class="day-tile"><span>GAME TIME</span><strong id="game-day">DAY 01</strong><small>New day every 3.5s</small></div></div>
+        <div class="control-top"><div><span class="eyebrow">YOUR ESTATE</span><div class="wallet" id="money">$120</div></div><div class="day-tile"><span>GAME TIME</span><strong id="game-day">DAY 01</strong><small id="bill-countdown">Bill in 30 days</small></div></div>
         <nav class="main-nav" aria-label="Game sections">
           <button type="button" data-route="land" class="nav-item active"><span>⌑</span> Land</button>
           <button type="button" data-route="market" class="nav-item"><span>⌁</span> Market</button>
           <button type="button" data-route="coffee" class="nav-item"><span>☕</span> Coffee shop</button>
           <button type="button" data-route="buildings" class="nav-item"><span>▥</span> Buildings</button>
+          <button type="button" data-route="office" class="nav-item"><span>▤</span> Office</button>
           <button type="button" data-route="goal" class="nav-item"><span>✦</span> Goal</button>
         </nav>
         <div class="control-content"><div id="view" class="route-view"></div></div>
@@ -36,6 +38,7 @@
     </main>
   </div>
   <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+  <dialog id="results-dialog" aria-labelledby="results-title"></dialog>
   <script type="module" src="src/plot.js"></script>
 </body>
 </html>

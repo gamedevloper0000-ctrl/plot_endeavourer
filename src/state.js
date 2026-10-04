@@ -2,6 +2,8 @@
 export const COLS = 12;
 export const ROWS = 10;
 export const TICK_MS = 3500;
+export const DAYS_PER_MONTH = 30;
+export const SALE_FEE_RATE = .05;
 export const TWIST_BONUS = 35;
 export const BUILDING = { cost: 320, radius: 2, valuePerDay: 7, selfValuePerDay: 4,
   resaleValue: 200, maxPlotBonus: 280 };
@@ -27,6 +29,12 @@ export const ORDERS = [
     line: "There is a handle behind the town map. I have seen it." }
 ];
 export const INGREDIENTS = ["SHOT", "MILK", "FOAM", "HONEY", "CINNAMON", "CHOCOLATE", "ICE"];
+export const EMPLOYEES = [
+  { id: "analyst", name: "Market Analyst", symbol: "⌁", costs: [180, 300], benefit: ["7-day trend reports", "3-day price forecasts"] },
+  { id: "agent", name: "Land Agent", symbol: "⌂", costs: [120, 220], benefit: ["2% cheaper land", "4% cheaper land"] },
+  { id: "accountant", name: "Accountant", symbol: "▤", costs: [60, 100], benefit: ["20% lower monthly bills", "40% lower monthly bills"] },
+  { id: "manager", name: "Coffee Manager", symbol: "☕", costs: [200, 340], benefit: ["12% higher order pay", "24% higher order pay"] }
+];
 
 const STORAGE_KEY = "plot-endeavourer-save-v1";
 const listeners = new Set();
@@ -74,7 +82,11 @@ function makeState(seed = Math.floor(Math.random() * 0x7fffffff)) {
       ingredientIndex: 0, mistakes: 0, brewGrade: 0, cleanOrders: 0, twistPerfectProgress: 0 },
     story: { chapter: 0, anomalyId: (marked[0] || plots[0]).id, twistCharges: 0, twists: 0,
       lastLine: "Someone scratched a spiral into the town map." },
-    carGoal: { price: 3900, purchased: false }, lastEvent: null
+    employees: Object.fromEntries(EMPLOYEES.map(employee => [employee.id, 0])),
+    finance: { startingWealth: 120, trackingSinceDay: 0, coffeeEarnings: 0, realizedLandProfit: 0,
+      insurancePaid: 0, taxPaid: 0, staffSpent: 0, buildingsBuilt: 0, worstDeal: null,
+      lastBill: null, history: [] },
+    carGoal: { price: 3900, purchased: false, availabilityAnnounced: false }, lastEvent: null
   };
 }
 
@@ -123,6 +135,28 @@ function loadState() {
       if (!Number.isInteger(saved.coffeeShopProgress.correctDeliveries) || saved.coffeeShopProgress.correctDeliveries < 0) saved.coffeeShopProgress.correctDeliveries = 0;
       if (!Number.isInteger(saved.coffeeShopProgress.cleanOrders) || saved.coffeeShopProgress.cleanOrders < 0) saved.coffeeShopProgress.cleanOrders = 0;
       if (!Number.isInteger(saved.coffeeShopProgress.twistPerfectProgress) || saved.coffeeShopProgress.twistPerfectProgress < 0 || saved.coffeeShopProgress.twistPerfectProgress > 2) saved.coffeeShopProgress.twistPerfectProgress = 0;
+      saved.employees = Object.fromEntries(EMPLOYEES.map(employee => [employee.id,
+        Number.isInteger(saved.employees?.[employee.id]) ? Math.max(0, Math.min(2, saved.employees[employee.id])) : 0]));
+      const previousFinance = saved.finance;
+      saved.finance = { ...fresh.finance, ...(previousFinance || {}) };
+      if (!previousFinance) {
+        // Older saves have no reliable earnings ledger. Start tracking from their actual current wealth.
+        saved.finance.startingWealth = saved.money + saved.plots.filter(plot => plot.owner === "player")
+          .reduce((sum, plot) => sum + plot.currentValue, 0) + (saved.carGoal.purchased ? saved.carGoal.price : 0);
+        saved.finance.trackingSinceDay = saved.gameTime;
+        saved.finance.buildingsBuilt = saved.plots.filter(plot => plot.building).length;
+      }
+      for (const key of ["startingWealth", "trackingSinceDay", "coffeeEarnings", "realizedLandProfit", "insurancePaid", "taxPaid", "staffSpent", "buildingsBuilt"]) {
+        if (!Number.isFinite(saved.finance[key])) saved.finance[key] = fresh.finance[key];
+      }
+      saved.finance.history = Array.isArray(saved.finance.history) ? saved.finance.history.filter(entry =>
+        entry && Number.isInteger(entry.day) && Number.isFinite(entry.amount) &&
+        ["coffee", "buy", "sell", "build", "staff", "bill", "car"].includes(entry.kind)).slice(-120) : [];
+      if (!saved.finance.lastBill || !["month", "insurance", "tax", "total", "wealth"].every(key => Number.isFinite(saved.finance.lastBill[key]))) saved.finance.lastBill = null;
+      if (!saved.finance.worstDeal || !Number.isFinite(saved.finance.worstDeal.profit) ||
+          !Number.isInteger(saved.finance.worstDeal.type) || !TYPES[saved.finance.worstDeal.type]) saved.finance.worstDeal = null;
+      saved.carGoal = { ...fresh.carGoal, ...saved.carGoal,
+        availabilityAnnounced: saved.carGoal.availabilityAnnounced === true };
       return saved;
     }
   } catch { /* Corrupt or disabled storage starts a fresh run. */ }
@@ -136,8 +170,98 @@ export const selectedPlot = () => getPlot(state.selectedId);
 export const ownedValue = () => state.plots.filter(plot => plot.owner === "player")
   .reduce((sum, plot) => sum + plot.currentValue, 0);
 export const ownedBuildings = () => state.plots.filter(plot => plot.owner === "player" && plot.building).length;
+export const employeeLevel = id => state.employees[id] || 0;
+export const purchaseCost = plot => Math.max(1, Math.round(plot.currentPrice * (1 - employeeLevel("agent") * .02)));
+// The closing fee is greater than the maximum agent discount, preventing instant buy/sell arbitrage.
+export const saleValue = plot => Math.max(0, Math.floor(plot.currentValue * (1 - SALE_FEE_RATE)));
+// currentValue already includes a building's resale value. Adding buildings again would double-tax them.
+export const economyValue = () => Math.max(0, state.money + ownedValue());
+// The purchased car remains an achievement asset, so buying it does not erase the run's earned profit.
+export const netRunProfit = () => state.money + ownedValue() + (state.carGoal.purchased ? state.carGoal.price : 0) - state.finance.startingWealth;
+export const daysUntilBill = () => DAYS_PER_MONTH - state.gameTime % DAYS_PER_MONTH;
+
+export function monthlyBillQuote() {
+  const wealth = economyValue();
+  const rate = .01 * (1 - employeeLevel("accountant") * .2);
+  const total = wealth > 0 ? Math.max(1, Math.round(wealth * rate)) : 0;
+  const insurance = Math.round(total * .4);
+  return { month: Math.floor(state.gameTime / DAYS_PER_MONTH) + 1, wealth, rate, insurance, tax: total - insurance, total };
+}
+
+function recordFinance(kind, amount, extra = {}) {
+  state.finance.history.push({ kind, amount, day: state.gameTime, ...extra });
+  if (state.finance.history.length > 120) state.finance.history.shift();
+}
+
+export function upgradeEmployee(id) {
+  const employee = EMPLOYEES.find(entry => entry.id === id);
+  if (!employee) return false;
+  const level = employeeLevel(id);
+  const cost = employee.costs[level];
+  if (cost === undefined) return false;
+  if (state.money < cost) { publish("no-money", { amount: cost - state.money }); return false; }
+  state.money -= cost;
+  state.employees[id] = level + 1;
+  state.finance.staffSpent += cost;
+  recordFinance("staff", -cost);
+  publish("employee-upgrade", { employeeId: id, level: level + 1, amount: cost });
+  return true;
+}
+
+export function marketChange(type, lookback = 7) {
+  const history = state.market[type].history;
+  const previous = history[Math.max(0, history.length - 1 - lookback)];
+  return previous ? (history.at(-1) - previous) / previous * 100 : 0;
+}
+
+export function marketAdvice() {
+  const tips = [];
+  const changes = TYPES.map((_, index) => ({ type: index, change: marketChange(index) }));
+  const rising = [...changes].sort((a, b) => b.change - a.change)[0];
+  const falling = [...changes].sort((a, b) => a.change - b.change)[0];
+  const analyst = employeeLevel("analyst");
+  if (analyst) {
+    const days = Math.min(7, state.market[0].history.length - 1);
+    tips.push({ employee: "analyst", tone: "up", text: days ?
+      `${TYPES[rising.type].name} has the strongest ${days}-day move: ${rising.change >= 0 ? "+" : ""}${rising.change.toFixed(1)}%. ${rising.change > 0 ? "Owners could take profit here." : "All types are soft; keep cash for a better entry."}` :
+      "The price record has just started. Give the market a few days before trusting a trend." });
+    if (days && falling.change < 0) tips.push({ employee: "analyst", tone: "down", text:
+      `${TYPES[falling.type].name} is down ${Math.abs(falling.change).toFixed(1)}% over ${days} days. Its lower price may be an entry, but the trend is still falling.` });
+    if (analyst === 2) {
+      const forecasts = TYPES.map((type, index) => ({ type: index,
+        change: (Math.round(type.base * marketMultiplier(index, state.gameTime + 3)) - state.market[index].currentPrice) / state.market[index].currentPrice * 100 }));
+      const warning = [...forecasts].sort((a, b) => a.change - b.change)[0];
+      const opportunity = [...forecasts].sort((a, b) => b.change - a.change)[0];
+      tips.push({ employee: "analyst", tone: warning.change < -1 ? "down" : "up", text:
+        `3-day cycle forecast: ${TYPES[opportunity.type].name} ${opportunity.change >= 0 ? "+" : ""}${opportunity.change.toFixed(1)}%; ${TYPES[warning.type].name} ${warning.change >= 0 ? "+" : ""}${warning.change.toFixed(1)}%. This forecast covers the market cycle; building gains are extra.` });
+    }
+  }
+  if (employeeLevel("agent")) {
+    const plot = selectedPlot();
+    if (plot) {
+      const stations = state.plots.filter(source => source.building && source.id !== plot.id &&
+        Math.abs(source.x - plot.x) + Math.abs(source.y - plot.y) <= BUILDING.radius).length;
+      const buildingReport = plot.buildingEffects >= BUILDING.maxPlotBonus ? "This parcel has reached its building-gain cap." :
+        `${stations} nearby station${stations === 1 ? "" : "s"} affect this site${plot.building ? ", plus its own station" : ""}.`;
+      tips.push({ employee: "agent", tone: "neutral", text: plot.owner === "player" ?
+        `Selling the selected parcel now would make $${Math.abs(saleValue(plot) - plot.costBasis)} ${saleValue(plot) >= plot.costBasis ? "profit" : "loss"}, after closing fees. ${buildingReport}` :
+        `Our ${employeeLevel("agent") * 2}% discount saves $${plot.currentPrice - purchaseCost(plot)} on the selected parcel. ${buildingReport}` });
+    } else tips.push({ employee: "agent", tone: "neutral", text: `Select a parcel for its margin and nearby building report. Your land purchases cost ${employeeLevel("agent") * 2}% less.` });
+  }
+  if (employeeLevel("accountant")) {
+    const bill = monthlyBillQuote();
+    tips.push({ employee: "accountant", tone: "neutral", text: `Reserve about $${bill.total} for the bill in ${daysUntilBill()} days. Your ${employeeLevel("accountant") * 20}% reduction is included. Current cash ${state.money < bill.total ? "does not cover it yet" : "covers it"}.` });
+  }
+  if (employeeLevel("manager")) tips.push({ employee: "manager", tone: "up", text: `The shop has earned $${state.finance.coffeeEarnings} since the ledger opened. Every order now pays ${employeeLevel("manager") * 12}% more, including skill bonuses.` });
+  return tips;
+}
 
 function publish(kind, detail = {}) {
+  if (!state.carGoal.purchased && state.money >= state.carGoal.price && !state.carGoal.availabilityAnnounced) {
+    state.carGoal.availabilityAnnounced = true;
+    detail.carAvailable = true;
+    if (!kind) kind = "car-available";
+  }
   if (kind) state.lastEvent = { kind, ...detail, token: Date.now() + Math.random() };
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch { /* Play remains possible without storage. */ }
   listeners.forEach(listener => listener(state, kind));
@@ -154,13 +278,14 @@ export function selectPlot(id) {
 export function buySelected() {
   const plot = selectedPlot();
   if (!plot || plot.owner) return false;
-  if (state.money < plot.currentPrice) { publish("no-money", { amount: plot.currentPrice - state.money }); return false; }
-  const cost = plot.currentPrice;
+  const cost = purchaseCost(plot);
+  if (state.money < cost) { publish("no-money", { amount: cost - state.money }); return false; }
   state.money -= cost;
   plot.owner = "player";
   plot.purchasePrice = cost;
   plot.costBasis = cost;
   state.ownedPlots.push(plot.id);
+  recordFinance("buy", -cost);
   const reveal = plot.id === state.story.anomalyId && state.story.chapter >= 1 && state.story.chapter < 2;
   if (reveal) { state.story.chapter = 2; state.story.twistCharges = 1; }
   publish("buy", { plotId: plot.id, amount: cost, storyBeat: reveal ? "reveal" : null });
@@ -170,9 +295,12 @@ export function buySelected() {
 export function sellSelected() {
   const plot = selectedPlot();
   if (!plot || plot.owner !== "player") return false;
-  const amount = plot.currentValue;
+  const amount = saleValue(plot);
   const profit = amount - plot.costBasis;
   state.money += amount;
+  state.finance.realizedLandProfit += profit;
+  if (!state.finance.worstDeal || profit < state.finance.worstDeal.profit) state.finance.worstDeal = { type: plot.type, profit };
+  recordFinance("sell", amount, { profit });
   plot.owner = null;
   plot.purchasePrice = null;
   plot.costBasis = null;
@@ -186,6 +314,8 @@ export function buildSelected() {
   if (!plot || plot.owner !== "player" || plot.building) return false;
   if (state.money < BUILDING.cost) { publish("no-money", { amount: BUILDING.cost - state.money }); return false; }
   state.money -= BUILDING.cost;
+  state.finance.buildingsBuilt += 1;
+  recordFinance("build", -BUILDING.cost);
   plot.building = { builtOnDay: state.gameTime };
   plot.costBasis += BUILDING.cost;
   state.buildings.push(plot.id);
@@ -270,7 +400,16 @@ export function tick() {
     }
   }
   updatePlotValues();
-  publish(null);
+  if (state.gameTime % DAYS_PER_MONTH === 0) {
+    const bill = { ...monthlyBillQuote(), month: state.gameTime / DAYS_PER_MONTH };
+    // A small cash overdraft is allowed; land is never forcibly sold. Coffee work clears it.
+    state.money -= bill.total;
+    state.finance.insurancePaid += bill.insurance;
+    state.finance.taxPaid += bill.tax;
+    state.finance.lastBill = bill;
+    recordFinance("bill", -bill.total, { insurance: bill.insurance, tax: bill.tax });
+    publish("month-bill", bill);
+  } else publish(null);
 }
 
 export function prepareCoffee(ingredient) {
@@ -297,9 +436,12 @@ export function deliverCoffee(customerId) {
   if (coffee.step !== "completed" || !CUSTOMERS.some(customer => customer.id === customerId)) return false;
   const order = ORDERS[coffee.orderIndex % ORDERS.length];
   const correct = customerId === order.customer;
-  const pay = Math.max(28, order.pay + coffee.brewGrade * 8 +
+  const basePay = Math.max(28, order.pay + coffee.brewGrade * 8 +
     (coffee.mistakes === 0 ? 8 : -coffee.mistakes * 4) + (correct ? 12 : -20));
+  const pay = Math.round(basePay * (1 + employeeLevel("manager") * .12));
   state.money += pay;
+  state.finance.coffeeEarnings += pay;
+  recordFinance("coffee", pay);
   coffee.served += 1;
   if (correct) coffee.correctDeliveries += 1;
   if (correct) state.story.lastLine = order.line;
@@ -337,6 +479,7 @@ export function purchaseCar() {
   if (state.carGoal.purchased || state.money < state.carGoal.price) return false;
   state.money -= state.carGoal.price;
   state.carGoal.purchased = true;
+  recordFinance("car", -state.carGoal.price);
   publish("goal", { amount: state.carGoal.price });
   return true;
 }

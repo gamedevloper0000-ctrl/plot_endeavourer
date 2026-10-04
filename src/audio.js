@@ -78,7 +78,12 @@ export function playSound(kind, detail = {}) {
   if (kind === "coffee-brew") { clip(POUR, .23, 1900); tone(detail.grade === 2 ? 800 : 410, .13, "triangle"); return; }
   if (kind === "coffee-deliver") { clip(CUP, .4, 1650); setTimeout(() => clip(STEP, .3, 280), 160); tone(detail.correct ? 740 : 210, .16, "triangle"); return; }
   if (kind === "twist") { tone(300, .3, "sawtooth", .035); setTimeout(() => tone(590, .2, "triangle"), 130); return; }
-  if (kind === "buy" || kind === "sell" || kind === "build" || kind === "goal" || kind === "coffee-ready") {
+  if (kind === "month-bill") { tone(390, .12, "triangle", .018); setTimeout(() => tone(330, .14, "triangle", .018), 130); return; }
+  if (kind === "car-available") {
+    [660, 880, 1100].forEach((frequency, index) => setTimeout(() => tone(frequency, .2, "triangle"), index * 110));
+    return;
+  }
+  if (["buy", "sell", "build", "goal", "coffee-ready", "employee-upgrade"].includes(kind)) {
     tone(kind === "goal" ? 880 : kind === "buy" ? 580 : 690, .16, "triangle");
     setTimeout(() => tone(kind === "goal" ? 1175 : 900, .18, "triangle"), 100);
     return;
