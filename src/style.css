@@ -151,3 +151,38 @@ body{font-family:Consolas,"Courier New",monospace;letter-spacing:-.02em;backgrou
 @keyframes story-flash{0%{opacity:0;transform:scale(1.3)}15%,70%{opacity:1;transform:scale(1)}72%{opacity:.35}80%{opacity:1}100%{opacity:0;visibility:hidden}}
 @media(max-width:760px){.control-panel{box-shadow:none;border-top:5px solid #102d26}.world-heading h1{font-size:44px}}
 @media(max-width:430px){.nav-item{font-size:9px;min-height:49px;padding:8px 2px;border-right:1px solid #ad986f}.world-heading h1{font-size:38px}.story-strip{padding:10px}.story-strip p{font-size:9px}.arcade-label{font-size:10px}.arcade-label span{font-size:8px}.order-pay{font-size:11px}.customer-options button strong{font-size:10px}}
+
+/* Tiny Town storefront, original pixel people, and the opt-in audio control. */
+.sound-toggle{border:2px solid #d5aa68;background:#1e4538;color:#f5d18c;padding:7px 10px;font:900 10px Consolas,monospace;letter-spacing:.04em;white-space:nowrap;box-shadow:3px 3px 0 #0a1f1b}
+.sound-toggle:hover{background:#32634b}.sound-toggle[aria-pressed="true"]{background:#e2b56a;color:#203a2c}
+.shop-scene{height:232px;background:#79a75e;border:4px solid #493b2c;box-shadow:6px 6px 0 #b29f78;isolation:isolate}
+.shop-scene:before{width:100%;height:36px;left:0;top:auto;bottom:0;transform:none;opacity:1;background:repeating-linear-gradient(90deg,#c6a476 0 22px,#d9b483 22px 25px);border-top:5px solid #987a52;z-index:-1}
+.shop-scene:after{content:"";position:absolute;left:0;top:42px;bottom:33px;width:36%;background:repeating-linear-gradient(90deg,#b89060 0 25px,#a77e52 25px 28px);border-right:7px solid #5a3c2e;box-shadow:inset 0 10px #d6b280;z-index:-1}
+.shop-roof{position:absolute;left:0;top:0;width:39%;height:51px;background:repeating-linear-gradient(90deg,#b8624b 0 16px,#c96a4e 16px 32px);border-bottom:8px solid #713f39;clip-path:polygon(0 22%,43% 22%,51% 0,100% 0,100% 100%,0 100%)}
+.shop-sign{top:57px;left:10px;max-width:31%;font-size:10px;line-height:1.2;transform:none;text-align:center;z-index:1}
+.shop-window{position:absolute;left:7%;top:111px;width:12%;height:34px;background:#75b5bf;border:5px solid #6d4634;box-shadow:inset 0 0 0 3px #aad4cc}
+.shop-door{position:absolute;left:23%;top:109px;width:10%;height:76px;background:#64412f;border:5px solid #3f2d29;box-shadow:inset 4px 0 #ac754d}
+.shop-door:after{content:"";position:absolute;right:4px;top:28px;width:4px;height:4px;background:#f2c46b}
+.shop-counter{display:none}
+.queue-caption{position:absolute;left:40%;right:2%;top:13px;color:#244733;font:900 10px Consolas,monospace;letter-spacing:.08em;display:flex;flex-direction:column;gap:3px}
+.queue-caption span{font-size:8px;color:#466044;letter-spacing:.01em}
+.customer-queue{position:absolute;left:40%;right:2%;top:55px;bottom:27px;display:flex;align-items:end;justify-content:space-around;gap:2px}
+.queue-person{position:relative;z-index:1;display:flex;flex:1;min-width:0;height:134px;flex-direction:column;align-items:center;justify-content:end;padding:4px 1px 0;border:2px solid transparent;background:transparent;color:#173d31;font:900 10px Consolas,monospace;transition:transform .16s,background .16s}
+.queue-person:disabled{opacity:1;cursor:default}
+.queue-person.first{background:rgba(255,232,156,.28);border-color:#e9ce84}
+.queue-person:not(:disabled):hover,.queue-person:not(:disabled):focus-visible{background:#e8d090;transform:translateY(-5px);border-color:#6b6f43;outline:0}
+.pixel-person{display:block;position:relative;width:32px;height:70px;flex:none;filter:drop-shadow(4px 4px 0 #496743)}
+.pixel-person i{position:absolute;display:block}
+.pixel-hair{left:5px;top:0;width:22px;height:17px;background:var(--hair);box-shadow:-3px 5px 0 var(--hair),3px 5px 0 var(--hair)}
+.pixel-face{left:7px;top:9px;width:18px;height:20px;background:#efb77b;box-shadow:0 3px 0 #d9925e}
+.pixel-face:after{content:"";position:absolute;left:4px;top:6px;width:3px;height:5px;background:#243834;box-shadow:8px 0 #243834}
+.pixel-shirt{left:5px;top:31px;width:22px;height:21px;background:var(--shirt);box-shadow:inset 0 -5px rgba(28,58,54,.18)}
+.pixel-arm{top:33px;width:5px;height:19px;background:#efb77b}.pixel-arm.left{left:0}.pixel-arm.right{right:0}
+.pixel-legs{left:7px;top:52px;width:18px;height:18px;background:linear-gradient(90deg,var(--pants) 0 7px,transparent 7px 11px,var(--pants) 11px 18px);box-shadow:0 3px 0 #303a37}
+.person-mara{--hair:#563d35;--shirt:#eeb45b;--pants:#547fa2}.person-dax{--hair:#3d575c;--shirt:#d7d69d;--pants:#3c6684}.person-nell{--hair:#775b48;--shirt:#f1eee0;--pants:#3782a5}
+.person-dax .pixel-hair{background:#6097b4;box-shadow:-4px 4px 0 #6097b4,4px 4px 0 #6097b4,0 -3px 0 #6097b4}
+.person-nell .pixel-hair{height:24px;box-shadow:-4px 8px 0 #775b48,4px 8px 0 #775b48}
+.queue-name{display:block;margin-top:5px;padding:2px 3px;background:#ead4a5;min-width:40px;text-align:center;line-height:1.1;border:1px solid #886c4b}
+.queue-name small{display:block;color:#63704f;font-size:8px;font-weight:700}
+.asset-credits{margin-top:13px;padding-top:9px;border-top:1px dashed #ad9c75;color:#5d7259;font-size:10px;line-height:1.5}.asset-credits summary{cursor:pointer;font-weight:900;letter-spacing:.07em}.asset-credits p{margin:6px 0 0}.asset-credits a{color:#336b55;text-decoration:underline;text-underline-offset:2px}
+@media(max-width:430px){.topbar-right{gap:7px}.sound-toggle{font-size:8px;padding:6px 5px}.shop-scene{height:215px}.shop-sign{font-size:8px}.customer-queue{top:51px;bottom:24px}.queue-person{height:126px}.queue-name{font-size:9px}.queue-name small{font-size:7px}}

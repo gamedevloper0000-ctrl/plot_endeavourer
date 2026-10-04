@@ -1,4 +1,5 @@
 import { drawgrid, convert, highlight } from "./grid.js";
+import { playSound, resumeSound, setSoundEnabled, soundEnabled } from "./audio.js";
 import {
   COLS, ROWS, TICK_MS, TYPES, ORDERS, CUSTOMERS, INGREDIENTS, BUILDING, TWIST_BONUS, state, getPlot, selectedPlot,
   ownedValue, ownedBuildings, plotId, isRoad, subscribe, selectPlot,
@@ -13,7 +14,7 @@ const view = $("#view");
 const moneyNode = $("#money");
 const popup = $("#map-popup");
 const sprite = new Image();
-sprite.src = "public/assets/images/land.png";
+sprite.src = "public/assets/images/tiny-town.png";
 const money = amount => `$${Math.round(amount).toLocaleString("en-US")}`;
 const signedMoney = amount => `${amount >= 0 ? "+" : "−"}${money(Math.abs(amount))}`;
 const coordinate = plot => `${String.fromCharCode(65 + plot.x)}${plot.y + 1}`;
@@ -140,6 +141,19 @@ function ingredientChoices(order, orderIndex) {
     ((INGREDIENTS.indexOf(b) + orderIndex * 2) % 7));
 }
 
+function renderCustomerQueue(coffee) {
+  const people = [];
+  for (let offset = 0; people.length < 3 && offset < ORDERS.length * 2; offset++) {
+    const person = CUSTOMERS.find(entry => entry.id === ORDERS[(coffee.orderIndex + offset) % ORDERS.length].customer);
+    if (!people.some(entry => entry.id === person.id)) people.push(person);
+  }
+  return `<div class="queue-caption">CUSTOMERS WAITING <span>${coffee.step === "completed" ? "CHOOSE WHO GETS THE CUP ↘" : "NEXT UP · " + people[0].name.toUpperCase()}</span></div>
+    <div class="customer-queue" aria-label="Coffee shop customer line">${people.map((person, index) =>
+      `<button class="queue-person ${index === 0 ? "first" : ""} person-${person.id}" type="button" data-customer="${person.id}" aria-label="Serve ${person.name}, ${person.role}" ${coffee.step !== "completed" ? "disabled" : ""}>
+        <span class="pixel-person" aria-hidden="true"><i class="pixel-hair"></i><i class="pixel-face"></i><i class="pixel-shirt"></i><i class="pixel-arm left"></i><i class="pixel-arm right"></i><i class="pixel-legs"></i></span>
+        <span class="queue-name">${person.name}<small>${person.role}</small></span></button>`).join("")}</div>`;
+}
+
 function renderCoffee() {
   const coffee = state.coffeeShopProgress;
   const order = ORDERS[coffee.orderIndex % ORDERS.length];
@@ -156,14 +170,14 @@ function renderCoffee() {
       <div class="brew-meter" role="img" aria-label="Timing meter; stop the moving needle in the gold zone"><div class="brew-zone" style="left:${order.target - 8}%"></div><div class="brew-needle" id="brew-needle"></div></div>
       <div class="brew-scale"><span>UNDER</span><span>SWEET SPOT</span><span>OVER</span></div>
       <button class="primary brew-stop" data-action="brew">■ &nbsp; STOP THE SHOT</button>` : `<div class="arcade-label">03 / FIND THE CUSTOMER <span>${coffee.brewGrade === 2 ? "PERFECT SHOT" : coffee.brewGrade === 1 ? "GOOD SHOT" : "ROUGH SHOT"}</span></div>
-      <p class="arcade-instruction">The ticket says <strong>${customer.name}</strong>, the ${customer.role.toLowerCase()}. Hand it to the right person for the full tip.</p>
-      <div class="customer-options">${CUSTOMERS.map(person => `<button data-customer="${person.id}"><span>${person.icon}</span><strong>${person.name}</strong><small>${person.role}</small></button>`).join("")}</div>`;
+      <p class="arcade-instruction">The ticket says <strong>${customer.name}</strong>, the ${customer.role.toLowerCase()}. Tap the right person in the line above to hand over the cup.</p>`;
   return `${sectionHeading("coffee")}
-    <div class="shop-scene"><span class="shop-sign">THE CORNER CUP / OPEN LATE</span><span class="steam">〰</span><span class="cup">☕</span><span class="shop-counter"></span></div>
+    <div class="shop-scene"><span class="shop-roof"></span><span class="shop-sign">THE CORNER CUP / OPEN LATE</span><span class="shop-window"></span><span class="shop-door"></span><span class="shop-counter"></span>${renderCustomerQueue(coffee)}</div>
     <div class="order-paper"><span class="eyebrow-mini">TICKET #${String(coffee.served + 1).padStart(3, "0")} / ${customer.role.toUpperCase()}</span><strong class="order-pay">${money(order.pay)} + TIP</strong><h3>${order.name}</h3><p>FOR ${customer.name.toUpperCase()} &nbsp;·&nbsp; ${order.ingredients.join(" → ")}</p></div>
     <div class="arcade-panel">${stage}</div>
     <div class="coffee-rumor"><span>LAST THING OVERHEARD</span><p>“${state.story.lastLine}”</p></div>
-    <p class="shop-tip">${coffee.served} ${coffee.served === 1 ? "order" : "orders"} served · ${coffee.cleanOrders} perfect. ${state.story.chapter >= 2 ? `${coffee.twistPerfectProgress}/3 perfect orders toward your next plot turn.` : "Perfect orders will power the turntable once the secret is found."}</p>`;
+    <p class="shop-tip">${coffee.served} ${coffee.served === 1 ? "order" : "orders"} served · ${coffee.cleanOrders} perfect. ${state.story.chapter >= 2 ? `${coffee.twistPerfectProgress}/3 perfect orders toward your next plot turn.` : "Perfect orders will power the turntable once the secret is found."}</p>
+    <details class="asset-credits"><summary>ART + SOUND CREDITS</summary><p>Town tiles: <a href="https://kenney.nl/assets/tiny-town" target="_blank" rel="noopener noreferrer">Kenney</a> (CC0). Step dirt: <a href="https://freesound.org/people/heyheytheree/sounds/872597/" target="_blank" rel="noopener noreferrer">heyheytheree</a> (<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>). Coffee pour: <a href="https://freesound.org/people/Maajora/sounds/432775/" target="_blank" rel="noopener noreferrer">Maajora</a> (CC0). Cup: <a href="https://freesound.org/people/TheHiraHira/sounds/460242/" target="_blank" rel="noopener noreferrer">TheHiraHira</a> (CC0). Music: “The Morning Air” by Evan King, supplied by the project owner.</p></details>`;
 }
 
 function renderBuildings() {
@@ -263,6 +277,7 @@ function flashStory(text) {
 function handleEvent(event) {
   if (!event || event.token === lastEventToken) return;
   lastEventToken = event.token;
+  playSound(event.kind, event);
   if (event.kind === "select") return;
   if (event.kind === "build") builtAt = performance.now();
   const messages = {
@@ -325,50 +340,39 @@ function resizeCanvas() {
 }
 
 function tileRect(x, y) { return [originX + x * tileSize, originY + y * tileSize, tileSize]; }
-function spriteTile(index, x, y) {
-  const [px, py, size] = tileRect(x, y);
-  if (sprite.complete && sprite.naturalWidth >= 150) ctx.drawImage(sprite, index * 30, 0, 30, 30, px, py, size, size);
-  else { ctx.fillStyle = ["#9aa49b", ...TYPES.map(type => type.color)][index]; ctx.fillRect(px, py, size, size); }
-  if (index !== 0) { ctx.fillStyle = "rgba(21,56,45,.13)"; ctx.fillRect(px, py, size, size); }
+function tinyTile(index, x, y, width, height = width) {
+  if (sprite.complete && sprite.naturalWidth === 192) {
+    ctx.drawImage(sprite, (index % 12) * 16, Math.floor(index / 12) * 16, 16, 16, x, y, width, height);
+  }
 }
 
 function drawRoad(x, y) {
   const [px, py, s] = tileRect(x, y);
-  spriteTile(0, x, y);
-  ctx.fillStyle = "rgba(31,61,55,.19)";
-  ctx.fillRect(px, py, s, s);
-  ctx.strokeStyle = "rgba(251,238,190,.66)";
-  ctx.lineWidth = Math.max(1, s * .035);
-  ctx.setLineDash([s * .18, s * .13]);
-  ctx.beginPath();
-  if (x === 5) { ctx.moveTo(px + s * .5, py + s * .07); ctx.lineTo(px + s * .5, py + s * .93); }
-  if (y === 4) { ctx.moveTo(px + s * .07, py + s * .5); ctx.lineTo(px + s * .93, py + s * .5); }
-  ctx.stroke();
-  ctx.setLineDash([]);
+  ctx.fillStyle = "#7eaa64"; ctx.fillRect(px, py, s + .5, s + .5);
+  tinyTile(43, px, py, s + .5, s + .5);
+  if (x === 5 && y === 4) tinyTile(95, px + s * .3, py + s * .06, s * .42);
 }
 
-function drawTerrainDetail(plot, now) {
+function drawTerrainDetail(plot) {
   const [x, y, s] = tileRect(plot.x, plot.y);
-  const seed = (plot.x * 13 + plot.y * 29) % 7;
-  ctx.lineCap = "round";
+  const seed = (plot.x * 17 + plot.y * 31 + state.seed) >>> 0;
+  ctx.fillStyle = plot.type === 0 ? "#d9a06b" : "#7eaa64";
+  ctx.fillRect(x, y, s + .5, s + .5);
+  tinyTile(plot.type === 0 ? 25 : seed % 5 === 0 ? 1 : 0, x, y, s + .5, s + .5);
   if (plot.type === 0) {
-    ctx.strokeStyle = "rgba(132,101,34,.35)"; ctx.lineWidth = Math.max(1, s * .022);
-    for (let i = 0; i < 3; i++) { const yy = y + s * (.29 + i * .21); ctx.beginPath(); ctx.moveTo(x + s * .16, yy); ctx.lineTo(x + s * .83, yy - s * .14); ctx.stroke(); }
-    ctx.fillStyle = "rgba(255,249,191,.65)"; ctx.fillRect(x + s * .22, y + s * .24, s * .07, s * .07);
+    if (seed % 4 === 0) tinyTile(2, x + s * .33, y + s * .22, s * .38);
+    else tinyTile(39, x + s * .13, y + s * .28, s * .7);
   } else if (plot.type === 1) {
-    ctx.fillStyle = "rgba(236,251,177,.43)";
-    for (let i = 0; i < 4; i++) { const xx = x + s * (.19 + ((i * 3 + seed) % 7) * .09); const yy = y + s * (.22 + ((i * 5 + seed) % 6) * .1); ctx.beginPath(); ctx.arc(xx, yy, Math.max(1.2, s * .035), 0, Math.PI * 2); ctx.fill(); }
+    tinyTile(seed % 3 === 0 ? 2 : 1, x + s * .17, y + s * .21, s * .66);
+    if (seed % 5 === 0) tinyTile(29, x + s * .55, y + s * .5, s * .34);
   } else if (plot.type === 2) {
-    for (let i = 0; i < 2; i++) {
-      const xx = x + s * (.3 + i * .36); const yy = y + s * (.33 + (seed % 3) * .08 + i * .12);
-      ctx.fillStyle = "rgba(23,62,39,.3)"; ctx.beginPath(); ctx.ellipse(xx + s * .06, yy + s * .10, s * .15, s * .07, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = i ? "#397b4d" : "#4e985d"; ctx.beginPath(); ctx.arc(xx, yy, s * .13, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "rgba(188,227,142,.35)"; ctx.beginPath(); ctx.arc(xx - s * .04, yy - s * .04, s * .045, 0, Math.PI * 2); ctx.fill();
-    }
+    tinyTile([4, 5, 6, 16][seed % 4], x + s * .16, y + s * .06, s * .72);
+    if (seed % 3 === 0) tinyTile(17, x + s * .56, y + s * .6, s * .3);
   } else {
-    ctx.strokeStyle = "rgba(228,250,232,.48)"; ctx.lineWidth = Math.max(1, s * .025);
-    const shift = Math.sin(now / 850 + seed) * s * .025;
-    for (let i = 0; i < 2; i++) { const yy = y + s * (.31 + i * .31); ctx.beginPath(); ctx.moveTo(x + s * .19 + shift, yy); ctx.quadraticCurveTo(x + s * .43, yy - s * .08, x + s * .68, yy); ctx.stroke(); }
+    ctx.fillStyle = "#398db2"; ctx.fillRect(x + s * .13, y + s * .24, s * .75, s * .56);
+    ctx.fillStyle = "#65b8d3"; ctx.fillRect(x + s * .2, y + s * .32, s * .62, s * .14);
+    ctx.fillStyle = "#a0d8df"; ctx.fillRect(x + s * .29, y + s * .42, s * .23, Math.max(2, s * .055));
+    tinyTile(seed % 2 ? 16 : 17, x + s * .03, y + s * .08, s * .31);
   }
 }
 
@@ -377,11 +381,14 @@ function drawBuilding(plot, now) {
   const age = Math.max(0, (now - builtAt) / 400);
   const bounce = state.lastEvent?.kind === "build" && state.lastEvent.plotId === plot.id && age < 1 ? 1 + Math.sin(age * Math.PI) * .2 : 1;
   ctx.save(); ctx.translate(x + s * .5, y + s * .52); ctx.scale(bounce, bounce);
-  ctx.fillStyle = "rgba(20,47,34,.36)"; ctx.beginPath(); ctx.ellipse(s * .045, s * .23, s * .3, s * .1, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = "#eed9a8"; ctx.fillRect(-s * .22, -s * .08, s * .44, s * .32);
-  ctx.fillStyle = "#7a5944"; ctx.beginPath(); ctx.moveTo(-s * .27, -s * .08); ctx.lineTo(0, -s * .31); ctx.lineTo(s * .27, -s * .08); ctx.closePath(); ctx.fill();
-  ctx.fillStyle = "#435d4c"; ctx.fillRect(-s * .06, s * .05, s * .12, s * .19);
-  ctx.fillStyle = "#97b5a1"; ctx.fillRect(s * .1, -s * .02, s * .07, s * .08);
+  ctx.fillStyle = "rgba(20,47,34,.36)"; ctx.fillRect(-s * .31, s * .24, s * .65, s * .08);
+  const part = s * .35;
+  tinyTile(64, -part, -part * .82, part, part);
+  tinyTile(65, 0, -part * .82, part, part);
+  tinyTile(76, -part, part * .18, part, part);
+  tinyTile(77, 0, part * .18, part, part);
+  tinyTile(85, -part * .8, part * .25, part * .45, part * .45);
+  tinyTile(86, part * .38, part * .25, part * .45, part * .45);
   ctx.restore();
 }
 
@@ -391,9 +398,9 @@ function drawMap(now) {
   ctx.fillStyle = "#345c4b"; ctx.fillRect(originX - 6, originY - 6, COLS * tileSize + 12, ROWS * tileSize + 12);
   for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
     if (isRoad(x, y)) drawRoad(x, y);
-    else { const plot = getPlot(plotId(x, y)); spriteTile(TYPES[plot.type].sprite, x, y); drawTerrainDetail(plot, now); }
+    else { const plot = getPlot(plotId(x, y)); drawTerrainDetail(plot); }
   }
-  drawgrid(ctx, originX, originY, COLS, ROWS, tileSize, "rgba(27,59,43,.28)");
+  drawgrid(ctx, originX, originY, COLS, ROWS, tileSize, "rgba(27,59,43,.10)");
   if (state.story.chapter === 1) {
     const marked = getPlot(state.story.anomalyId);
     const [x, y, s] = tileRect(marked.x, marked.y);
@@ -508,9 +515,19 @@ canvas.addEventListener("keydown", event => {
 });
 
 document.querySelectorAll(".nav-item").forEach(button => button.addEventListener("click", () => {
+  playSound("navigate");
   location.hash = button.dataset.route;
   if (route === button.dataset.route) setRoute(route);
 }));
+const soundButton = $("#sound-toggle");
+function updateSoundButton() {
+  const on = soundEnabled();
+  soundButton.textContent = on ? "♪ SOUND ON" : "♪ SOUND OFF";
+  soundButton.setAttribute("aria-pressed", String(on));
+  soundButton.setAttribute("aria-label", on ? "Turn game sound off" : "Turn game sound on");
+}
+soundButton.addEventListener("click", () => { setSoundEnabled(!soundEnabled()); updateSoundButton(); });
+document.addEventListener("pointerdown", resumeSound, { once: true });
 window.addEventListener("hashchange", () => setRoute(location.hash.slice(1)));
 view.addEventListener("click", event => {
   const choice = event.target.closest("[data-select]");
@@ -559,5 +576,6 @@ observer.observe(canvas);
 resizeCanvas();
 setRoute(location.hash.slice(1));
 updateChrome();
+updateSoundButton();
 setInterval(tick, TICK_MS);
 requestAnimationFrame(animate);
